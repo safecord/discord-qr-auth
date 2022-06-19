@@ -6,5 +6,6 @@ pub mod modules {
 
 #[tokio::main]
 async fn main() {
-    Authwebsocket::new("wss://remote-auth-gateway.discord.gg/?v=1".to_string()).await;
+    let mut ws = Authwebsocket::new("wss://remote-auth-gateway.discord.gg/?v=1".to_string()).await; 
+    ws.parser().await;
 }
