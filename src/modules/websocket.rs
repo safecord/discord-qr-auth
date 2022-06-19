@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use tokio::{
     net::TcpStream,
     sync::Mutex,
-    time::{self, Interval},
+    time::{self, sleep, Interval},
 };
 use tokio_tungstenite::{
     connect_async,
@@ -65,13 +65,15 @@ impl Authwebsocket {
     pub async fn parser(self) {
         let mut receiver = self.receiver.lock_owned().await;
 
+        let mut initialized = false;
+
         tokio::task::spawn(async move {
             while let Some(msg) = receiver.next().await {
                 let msg = msg.unwrap();
 
                 if msg.is_text() {
                     let content: Value = serde_json::from_str(&msg.to_string()).unwrap();
-                    println!("{}", content);
+                    println!("New message: {}", content);
 
                     match content["op"].as_str() {
                         Some("hello") => {
@@ -81,32 +83,28 @@ impl Authwebsocket {
                                 println!("Heartbeating every {} ms", duration);
                                 Authwebsocket::heartbeat(tx.clone(), duration).await;
                             });
-
-                            let key = self.key.lock().await;
-                            let pem = RsaPublicKey::from(&*key)
-                                .to_public_key_pem(LineEnding::LF)
-                                .unwrap();
-
-                            /*  let key = base64::encode(
-                                std::str::from_utf8(
-                                    RsaPublicKey::from(self.key.lock().await)
-                                        .to_pkcs1_der()
-                                        .unwrap(),
-                                )
-                                .unwrap(),
-                            );*/
-
-                            let init = Message::Text(
-                                json!({"op": "init", "encoded_public_key": pem}).to_string(),
-                            );
-                            match self.sender.clone().lock().await.send(init).await {
-                                Ok(_) => println!("Sent init message"),
-                                Err(err) => panic!("AuthWebSocket::heartbeat - Error: {:?}", &err),
-                            }
                         }
                         Some("heartbeat_ack") => {
-                            print!("Heartbeat acknowledged");
+                            println!("Heartbeat acknowledged");
                             /* TODO: check if heartbeat_ack did not happen after heartbeat OP */
+
+                            if initialized == false {
+                                let key = self.key.lock().await;
+                                let pem = RsaPublicKey::from(&*key)
+                                    .to_public_key_pem(LineEnding::LF)
+                                    .unwrap();
+                                    
+                                let init = Message::Text(
+                                    json!({"op": "init", "encoded_public_key": base64::encode(pem)}).to_string(),
+                                );
+
+                                match self.sender.clone().lock().await.send(init).await {
+                                    Ok(_) => println!("Sent init message"),
+                                    Err(err) => panic!("AuthWebSocket::parser - Error: {:?}", &err),
+                                }
+
+                                initialized = true;
+                            }
                         }
                         None => {
                             panic!("AuthWebSocket::parser - Error")
@@ -128,7 +126,6 @@ impl Authwebsocket {
 
         loop {
             interval.tick().await;
-
             let blood_cell = Message::Text(json!({"op": "heartbeat"}).to_string());
 
             match channel_sender.lock().await.send(blood_cell).await {
