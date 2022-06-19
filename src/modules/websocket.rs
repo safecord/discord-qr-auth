@@ -93,9 +93,12 @@ impl Authwebsocket {
                                 let pem = RsaPublicKey::from(&*key)
                                     .to_public_key_pem(LineEnding::LF)
                                     .unwrap();
-                                    
+
+                                let lines: String = pem.lines().skip(1).take(6).collect();
+                                println!("{:?}", lines);
+
                                 let init = Message::Text(
-                                    json!({"op": "init", "encoded_public_key": base64::encode(pem)}).to_string(),
+                                    json!({"op": "init", "encoded_public_key": lines}).to_string(),
                                 );
 
                                 match self.sender.clone().lock().await.send(init).await {
