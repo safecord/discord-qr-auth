@@ -4,6 +4,7 @@ use futures_util::{
     stream::{SplitSink, SplitStream, StreamExt},
     SinkExt,
 };
+use rsa::RsaPrivateKey;
 use serde_json::{json, Value};
 use tokio::{
     net::TcpStream,
@@ -83,8 +84,23 @@ impl Authwebsocket {
                             let duration = content["heartbeat_interval"].as_u64().unwrap();
                             tokio::task::spawn(async move {
                                 println!("Heartbeating every {} ms", duration);
-                                Authwebsocket::heartbeat(tx, duration).await;
+                                Authwebsocket::heartbeat(tx.clone(), duration).await;
                             });
+
+                            let mut rng = rand::thread_rng();
+                            let key =
+                                RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate key");
+                            let init = Message::Text(
+                                json!({"op": "init", "encoded_public_key"}).to_string(),
+                            );
+                            match self.channel_sender.clone().send(init) {
+                                Ok(_) => println!("Sent init message"),
+                                Err(err) => panic!("AuthWebSocket::heartbeat - Error: {:?}", &err),
+                            }
+                        }
+                        Some("heartbeat_ack") => {
+                            print!("Heartbeat acknowledged");
+                            /* TODO: check if heartbeat_ack did not happen after heartbeat OP */
                         }
                         None => {
                             panic!("AuthWebSocket::parser - Error")
