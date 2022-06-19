@@ -4,11 +4,15 @@ use futures_util::{
     stream::{SplitSink, SplitStream, StreamExt},
     SinkExt,
 };
-use rsa::RsaPrivateKey;
+use rand::{prelude::StdRng, SeedableRng};
+use rsa::{
+    pkcs8::{EncodePublicKey, LineEnding},
+    RsaPrivateKey, RsaPublicKey,
+};
 use serde_json::{json, Value};
 use tokio::{
     net::TcpStream,
-    sync::{Mutex},
+    sync::Mutex,
     time::{self, Interval},
 };
 use tokio_tungstenite::{
@@ -19,6 +23,7 @@ use tokio_tungstenite::{
 
 #[derive(Clone)]
 pub struct Authwebsocket {
+    pub key: Arc<Mutex<RsaPrivateKey>>,
     pub timeout: Arc<Mutex<Interval>>,
     pub sender: Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>,
     pub receiver: Arc<Mutex<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>>,
@@ -44,10 +49,16 @@ impl Authwebsocket {
 
         let (ws_sender, ws_receiver) = stream.split();
 
+        let mut rng: StdRng = SeedableRng::from_entropy();
+        let key = Arc::new(Mutex::new(
+            RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate key"),
+        ));
+
         Self {
             sender: Arc::new(Mutex::new(ws_sender)),
             receiver: Arc::new(Mutex::new(ws_receiver)),
             timeout: Arc::new(Mutex::new(time::interval(Duration::from_secs(60)))),
+            key,
         }
     }
 
@@ -71,13 +82,24 @@ impl Authwebsocket {
                                 Authwebsocket::heartbeat(tx.clone(), duration).await;
                             });
 
-                            let mut rng = rand::thread_rng();
-                            let key =
-                                RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate key");
+                            let key = self.key.lock().await;
+                            let pem = RsaPublicKey::from(&*key)
+                                .to_public_key_pem(LineEnding::LF)
+                                .unwrap();
+
+                            /*  let key = base64::encode(
+                                std::str::from_utf8(
+                                    RsaPublicKey::from(self.key.lock().await)
+                                        .to_pkcs1_der()
+                                        .unwrap(),
+                                )
+                                .unwrap(),
+                            );*/
+
                             let init = Message::Text(
-                                json!({"op": "init", "encoded_public_key"}).to_string(),
+                                json!({"op": "init", "encoded_public_key": pem}).to_string(),
                             );
-                            match self.channel_sender.clone().send(init) {
+                            match self.sender.clone().lock().await.send(init).await {
                                 Ok(_) => println!("Sent init message"),
                                 Err(err) => panic!("AuthWebSocket::heartbeat - Error: {:?}", &err),
                             }
