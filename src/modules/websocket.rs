@@ -1,10 +1,13 @@
 use std::{sync::Arc, time::Duration};
 
-use futures_util::{stream::StreamExt, SinkExt};
+use futures_util::{
+    stream::{SplitSink, SplitStream, StreamExt},
+    SinkExt,
+};
 use serde_json::{json, Value};
 use tokio::{
     net::TcpStream,
-    sync::Mutex,
+    sync::{mpsc, Mutex},
     time::{self, Interval},
 };
 use tokio_tungstenite::{
@@ -15,9 +18,11 @@ use tokio_tungstenite::{
 
 #[derive(Clone)]
 pub struct Authwebsocket {
-    pub stream: Arc<Mutex<WebSocketStream<MaybeTlsStream<TcpStream>>>>,
-    pub interval: Arc<Mutex<Interval>>,
     pub timeout: Arc<Mutex<Interval>>,
+    pub sender: Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>,
+    pub receiver: Arc<Mutex<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>>,
+    pub channel_sender: mpsc::UnboundedSender<Message>,
+    pub channel_receiver: Arc<Mutex<mpsc::UnboundedReceiver<Message>>>,
 }
 
 impl Authwebsocket {
@@ -33,58 +38,79 @@ impl Authwebsocket {
         .header("Upgrade", "websocket")
         .body(()).unwrap();
 
+        let stream = match connect_async(request).await {
+            Ok(stream) => stream.0,
+            Err(err) => panic!("Error connecting to the Discord gateway: {:?}", &err),
+        };
+
+        let (ws_sender, ws_receiver) = stream.split();
+        let (tx, rx) = mpsc::unbounded_channel::<Message>();
+
         Self {
-            stream: match connect_async(request).await {
-                Ok(stream) => Arc::new(Mutex::new(stream.0)),
-                Err(err) => panic!("Error connecting to the Discord gateway: {:?}", &err),
-            },
-            interval: Arc::new(Mutex::new(time::interval(Duration::from_secs(60)))),
+            sender: Arc::new(Mutex::new(ws_sender)),
+            receiver: Arc::new(Mutex::new(ws_receiver)),
+            channel_sender: tx,
+            channel_receiver: Arc::new(Mutex::new(rx)),
             timeout: Arc::new(Mutex::new(time::interval(Duration::from_secs(60)))),
         }
     }
 
-    pub async fn parser(mut self) {
+    pub async fn parser(self) {
         // let mut auth = self.clone();
-        while let Some(msg) = self.stream.lock().await.next().await {
-            let msg = msg.unwrap();
 
-            if msg.is_text() {
-                let content: Value = serde_json::from_str(&msg.to_string()).unwrap();
+        let mut receiver = self.receiver.lock_owned().await;
+        let mut sender = self.sender.lock_owned().await;
 
-                match content["op"].as_str() {
-                    Some("hello") => {
-                        self.interval = Arc::new(Mutex::new(time::interval(
-                            Duration::from_millis(content["heartbeat_interval"].as_u64().unwrap()),
-                        )));
-                        self.timeout = Arc::new(Mutex::new(time::interval(Duration::from_millis(
-                            content["timeout_ms"].as_u64().unwrap(),
-                        ))));
+        let mut channel_receiver = self.channel_receiver.lock_owned().await;
 
-                        tokio::spawn(async move {
-                            loop {
-                                self.heartbeat();
-                                //Authwebsocket::heartbeat(&mut self);
-                            }
-                        });
+        tokio::task::spawn(async move {
+            while let Some(message) = channel_receiver.recv().await {
+                sender.send(message).await.unwrap();
+            }
+        });
+
+        tokio::task::spawn(async move {
+            while let Some(msg) = receiver.next().await {
+                let msg = msg.unwrap();
+
+                if msg.is_text() {
+                    let content: Value = serde_json::from_str(&msg.to_string()).unwrap();
+                    println!("{}", content);
+
+                    match content["op"].as_str() {
+                        Some("hello") => {
+                            let tx = self.channel_sender.clone();
+                            let duration = content["heartbeat_interval"].as_u64().unwrap();
+                            tokio::task::spawn(async move {
+                                println!("Heartbeating every {} ms", duration);
+                                Authwebsocket::heartbeat(tx, duration).await;
+                            });
+                        }
+                        None => {
+                            panic!("AuthWebSocket::parser - Error")
+                        }
+                        Some(&_) => (),
                     }
-                    None => {
-                        panic!("AuthWebSocket::parser - Error")
-                    }
-                    Some(&_) => (),
                 }
             }
-        }
+        })
+        .await
+        .unwrap();
     }
 
-    pub async fn heartbeat(&mut self) {
-        self.interval.lock().await.tick().await;
+    pub async fn heartbeat(channel_sender: mpsc::UnboundedSender<Message>, interval: u64) {
+        let mut interval = time::interval(Duration::from_millis(interval));
 
-        let blood_cell = Message::Text(json!({"op": "heartbeat"}).to_string());
+        loop {
+            interval.tick().await;
 
-        match self.stream.lock().await.send(blood_cell).await {
-            Ok(_) => println!("sent heartbeat"),
-            Err(err) => {
-                panic!("AuthWebSocket::heartbeat - Error: {:?}", &err);
+            let blood_cell = Message::Text(json!({"op": "heartbeat"}).to_string());
+
+            match channel_sender.send(blood_cell) {
+                Ok(_) => println!("Sent heartbeat"),
+                Err(err) => {
+                    panic!("AuthWebSocket::heartbeat - Error: {:?}", &err);
+                }
             }
         }
     }
