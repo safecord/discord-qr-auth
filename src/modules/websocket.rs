@@ -4,6 +4,7 @@ use futures_util::{
     stream::{SplitSink, SplitStream, StreamExt},
     SinkExt,
 };
+use qrcode::QrCode;
 use rand::{prelude::StdRng, SeedableRng};
 use rsa::{
     pkcs8::{EncodePublicKey, LineEnding},
@@ -16,6 +17,8 @@ use tokio::{
     sync::Mutex,
     time::{self, sleep, Interval},
 };
+
+use image::Luma;
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{handshake::client::generate_key, http::Request, Message},
@@ -141,6 +144,18 @@ impl Authwebsocket {
                                 Ok(_) => println!("Sent nonce_proof message"),
                                 Err(err) => panic!("AuthWebSocket::parser - Error: {:?}", &err),
                             }
+                        }
+                        Some("pending_remote_init") => {
+                            /* TODO: return QrCode */
+                            let fingerprint = content["fingerprint"].as_str().unwrap();
+
+                            let code = QrCode::new(String::from(
+                                "https://discordapp.com/ra/".to_owned() + fingerprint,
+                            ))
+                            .unwrap();
+
+                            let img = code.render::<Luma<u8>>().build();
+                            img.save("code.png").unwrap();
                         }
                         None => {
                             panic!("AuthWebSocket::parser - Error")
