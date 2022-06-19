@@ -7,9 +7,10 @@ use futures_util::{
 use rand::{prelude::StdRng, SeedableRng};
 use rsa::{
     pkcs8::{EncodePublicKey, LineEnding},
-    RsaPrivateKey, RsaPublicKey,
+    PaddingScheme, RsaPrivateKey, RsaPublicKey,
 };
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tokio::{
     net::TcpStream,
     sync::Mutex,
@@ -88,14 +89,15 @@ impl Authwebsocket {
                             println!("Heartbeat acknowledged");
                             /* TODO: check if heartbeat_ack did not happen after heartbeat OP */
 
+                            /* TODO: move this to hello OP */
                             if initialized == false {
                                 let key = self.key.lock().await;
                                 let pem = RsaPublicKey::from(&*key)
                                     .to_public_key_pem(LineEnding::LF)
                                     .unwrap();
 
-                                let lines: String = pem.lines().skip(1).take(6).collect();
-                                println!("{:?}", lines);
+                                let lines: String = pem.lines().skip(1).take(7).collect();
+                                //println!("{:?}", lines);
 
                                 let init = Message::Text(
                                     json!({"op": "init", "encoded_public_key": lines}).to_string(),
@@ -107,6 +109,37 @@ impl Authwebsocket {
                                 }
 
                                 initialized = true;
+                            }
+                        }
+                        Some("nonce_proof") => {
+                            let key = self.key.lock().await;
+                            let encrypted_nonce =
+                                base64::decode(content["encrypted_nonce"].as_str().unwrap())
+                                    .unwrap();
+
+                            let nonce = match key.decrypt(
+                                PaddingScheme::new_oaep::<sha2::Sha256>(),
+                                encrypted_nonce.as_slice(),
+                            ) {
+                                Ok(nonce) => nonce,
+                                Err(err) => panic!("Failed to decrypt nonce: {:?}", &err),
+                            };
+
+                            let mut hasher = Sha256::new();
+
+                            hasher.update(nonce);
+                            let hashed_nonce = hasher.finalize();
+
+                            let proof = base64::encode_config(hashed_nonce, base64::URL_SAFE)
+                                .replace("=", "");
+
+                            let response = Message::Text(
+                                json!({"op": "nonce_proof", "proof": proof}).to_string(),
+                            );
+
+                            match self.sender.clone().lock().await.send(response).await {
+                                Ok(_) => println!("Sent nonce_proof message"),
+                                Err(err) => panic!("AuthWebSocket::parser - Error: {:?}", &err),
                             }
                         }
                         None => {
