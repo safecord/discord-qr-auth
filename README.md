@@ -6,7 +6,9 @@ discord-qr-auth is a Rust library that lets you authenticate users using QR code
 
 ```rust
 use qrcode::render::unicode;
+use discord_qr_auth::core::websocket::Client;
 
+#[tokio::main]
 async fn main() {
     let mut ws = Client::default();
     ws.connect().await.unwrap();
