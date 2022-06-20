@@ -1,7 +1,7 @@
 use std::{str::from_utf8, sync::Arc, time::Duration};
 
 use futures_util::{
-    stream::{SplitSink, SplitStream, StreamExt},
+    stream::{SplitSink, StreamExt},
     SinkExt,
 };
 use qrcode::{render::unicode, QrCode};
@@ -16,7 +16,7 @@ use tokio::{
     net::TcpStream,
     sync::Mutex,
     task::JoinHandle,
-    time::{self, Interval},
+    time,
 };
 
 use tokio_tungstenite::{
