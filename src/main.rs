@@ -8,8 +8,8 @@ pub mod modules {
 
 #[tokio::main]
 async fn main() {
-    let ws = Authwebsocket::default();
-    let handle = ws.connect().await;
+    let mut ws = Authwebsocket::default();
+    ws.connect().await.unwrap();
     let qr = ws.get_code().await.unwrap();
 
     let image = qr
@@ -27,7 +27,7 @@ async fn main() {
 
     println!("And we have a token! {}", token);
 
-    handle.abort();
+    ws.handle.unwrap().abort();
 
     println!("Handler stopped.");
 }

@@ -12,12 +12,8 @@ use rsa::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tokio::{
-    net::TcpStream,
-    sync::Mutex,
-    task::JoinHandle,
-    time,
-};
+use thiserror::Error;
+use tokio::{net::TcpStream, sync::Mutex, task::JoinHandle, time};
 
 use tokio_tungstenite::{
     connect_async,
@@ -36,6 +32,26 @@ pub enum DiscordQrAuthMessage {
     QrCode(QrCode),
     User(DiscordUser),
     Token(String),
+}
+
+#[derive(Error, Debug)]
+pub enum DiscordQrAuthError {
+    #[error("failed to connect to WebSocket")]
+    ConnectionFailed(#[from] tokio_tungstenite::tungstenite::Error),
+    #[error("failed to create request")]
+    RequestFailed(#[from] tokio_tungstenite::tungstenite::http::Error),
+    #[error("unknown error")]
+    Unknown,
+}
+
+#[derive(Error, Debug)]
+pub enum DataError {
+    #[error("the WebSocket connection hasn't been started")]
+    NotConnected,
+    #[error("the WebSocket connection is closed")]
+    SocketClosed,
+    #[error("unknown error")]
+    Unknown,
 }
 
 impl std::fmt::Debug for DiscordQrAuthMessage {
@@ -57,9 +73,9 @@ impl std::fmt::Debug for DiscordQrAuthMessage {
     }
 }
 
-#[derive(Clone)]
 pub struct Authwebsocket {
     pub event_receiver: flume::Receiver<DiscordQrAuthMessage>,
+    pub handle: Option<JoinHandle<()>>,
     event_sender: flume::Sender<DiscordQrAuthMessage>,
 }
 
@@ -69,40 +85,69 @@ impl Default for Authwebsocket {
 
         Self {
             event_receiver,
+            handle: None,
             event_sender,
         }
     }
 }
 
 impl Authwebsocket {
-    pub async fn get_code(&self) -> Result<QrCode, ()> {
+    pub async fn get_code(&self) -> Result<QrCode, DataError> {
+        match &self.handle {
+            Some(handle) => {
+                if handle.is_finished() {
+                    return Err(DataError::SocketClosed);
+                }
+            }
+            None => return Err(DataError::NotConnected),
+        }
+
         while let Ok(msg) = self.event_receiver.recv() {
             if let DiscordQrAuthMessage::QrCode(qr) = msg {
                 return Ok(qr);
             }
         }
-        Err(())
+
+        Err(DataError::Unknown)
     }
 
-    pub async fn get_user(&self) -> Result<DiscordUser, ()> {
+    pub async fn get_user(&self) -> Result<DiscordUser, DataError> {
+        match &self.handle {
+            Some(handle) => {
+                if handle.is_finished() {
+                    return Err(DataError::SocketClosed);
+                }
+            }
+            None => return Err(DataError::NotConnected),
+        }
+
         while let Ok(msg) = self.event_receiver.recv() {
             if let DiscordQrAuthMessage::User(user) = msg {
                 return Ok(user);
             }
         }
-        Err(())
+        Err(DataError::Unknown)
     }
 
-    pub async fn get_token(&self) -> Result<String, ()> {
+    pub async fn get_token(&self) -> Result<String, DataError> {
+        match &self.handle {
+            Some(handle) => {
+                if handle.is_finished() {
+                    return Err(DataError::SocketClosed);
+                }
+            }
+            None => return Err(DataError::NotConnected),
+        }
+
         while let Ok(msg) = self.event_receiver.recv() {
             if let DiscordQrAuthMessage::Token(token) = msg {
                 return Ok(token);
             }
         }
-        Err(())
+        Err(DataError::Unknown)
     }
 
-    pub async fn connect(&self) -> JoinHandle<()> {
+    pub async fn connect(&mut self) -> Result<(), DiscordQrAuthError> {
         let request = Request::builder().uri(String::from("wss://remote-auth-gateway.discord.gg/?v=1"))
             .header("Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits")
             .header("Origin", "https://discord.com")
@@ -112,13 +157,9 @@ impl Authwebsocket {
             .header("Host", "remote-auth-gateway.discord.gg")
             .header("Connection", "Upgrade")
             .header("Upgrade", "websocket")
-            .body(())
-            .unwrap();
+            .body(())?;
 
-        let stream = match connect_async(request).await {
-            Ok(stream) => stream.0,
-            Err(err) => panic!("Error connecting to the Discord gateway: {:?}", &err),
-        };
+        let stream = connect_async(request).await?.0;
 
         let (ws_sender, mut ws_receiver) = stream.split();
 
@@ -271,7 +312,9 @@ impl Authwebsocket {
             }
         });
 
-        handle
+        self.handle = Some(handle);
+
+        Ok(())
     }
 
     pub async fn heartbeat(
