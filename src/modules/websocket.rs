@@ -27,7 +27,7 @@ use tokio_tungstenite::{
 
 struct DiscordUser {
     snowflake: u64,
-    discriminator: u8,
+    discriminator: String,
     avatar_hash: String,
     username: String,
 }
@@ -182,8 +182,10 @@ impl Authwebsocket {
                             let formatted: Vec<&str> = data_str.split(":").collect();
 
                             let user = DiscordUser {
-                                snowflake: formatted[0].parse::<u64>().unwrap(),
-                                discriminator: formatted[1].parse::<u8>().unwrap(),
+                                snowflake: formatted[0]
+                                    .parse::<u64>()
+                                    .expect("error parsing snowflake."),
+                                discriminator: formatted[1].to_string(),
                                 avatar_hash: formatted[2].to_string(),
                                 username: formatted[3].to_string(),
                             };
