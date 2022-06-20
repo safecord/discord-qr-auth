@@ -8,7 +8,7 @@ pub mod modules {
 
 #[tokio::main]
 async fn main() {
-    let ws = Authwebsocket::new("wss://remote-auth-gateway.discord.gg/?v=1".to_string()).await;
+    let ws = Authwebsocket::default();
     let handle = ws.parser().await;
     let qr = ws.get_code().await.unwrap();
 
@@ -20,7 +20,7 @@ async fn main() {
     println!("{}", image);
 
     let user = ws.get_user().await.unwrap();
-    
+
     println!("User {} scanned QR code!", user.username);
 
     let token = ws.get_token().await.unwrap();

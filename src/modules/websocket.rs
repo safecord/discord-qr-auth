@@ -59,11 +59,19 @@ impl std::fmt::Debug for DiscordQrAuthMessage {
 
 #[derive(Clone)]
 pub struct Authwebsocket {
-    pub timeout: Arc<Mutex<Interval>>,
-    sender: Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>,
-    receiver: Arc<Mutex<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>>,
     pub event_receiver: flume::Receiver<DiscordQrAuthMessage>,
     event_sender: flume::Sender<DiscordQrAuthMessage>,
+}
+
+impl Default for Authwebsocket {
+    fn default() -> Self {
+        let (event_sender, event_receiver) = flume::unbounded();
+
+        Self {
+            event_receiver,
+            event_sender,
+        }
+    }
 }
 
 impl Authwebsocket {
@@ -94,8 +102,8 @@ impl Authwebsocket {
         Err(())
     }
 
-    pub async fn new(url: String) -> Self {
-        let request = Request::builder().uri(url)
+    pub async fn parser(&self) -> JoinHandle<()> {
+        let request = Request::builder().uri(String::from("wss://remote-auth-gateway.discord.gg/?v=1"))
             .header("Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits")
             .header("Origin", "https://discord.com")
             .header("User-Agent", "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.63 Mobile Safari/537.36 Edg/102.0.1245.33")
@@ -112,36 +120,24 @@ impl Authwebsocket {
             Err(err) => panic!("Error connecting to the Discord gateway: {:?}", &err),
         };
 
-        let (ws_sender, ws_receiver) = stream.split();
+        let (ws_sender, mut ws_receiver) = stream.split();
 
-        let (tx, rx) = flume::unbounded();
-
-        Self {
-            sender: Arc::new(Mutex::new(ws_sender)),
-            receiver: Arc::new(Mutex::new(ws_receiver)),
-            timeout: Arc::new(Mutex::new(time::interval(Duration::from_secs(60)))),
-            event_sender: tx,
-            event_receiver: rx,
-        }
-    }
-
-    pub async fn parser(&self) -> JoinHandle<()> {
-        let receiver = self.receiver.clone();
+        let ws_sender = Arc::new(Mutex::new(ws_sender));
 
         let event_sender = self.event_sender.clone();
-        let ws_sender = self.sender.clone();
+
+        let mut rng: StdRng = SeedableRng::from_entropy();
+
+        let privkey = Arc::new(Mutex::new(
+            RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate key"),
+        ));
+
+        let pubkey = privkey.lock().await.to_public_key();
 
         let handle = tokio::task::spawn(async move {
             let mut initialized = false;
 
-            let mut rng: StdRng = SeedableRng::from_entropy();
-            let privkey = Arc::new(Mutex::new(
-                RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate key"),
-            ));
-            let pubkey = privkey.lock().await.to_public_key();
-            let mut rec = receiver.lock().await;
-
-            while let Some(msg) = rec.next().await {
+            while let Some(msg) = ws_receiver.next().await {
                 let msg = msg.unwrap();
 
                 if msg.is_text() {
