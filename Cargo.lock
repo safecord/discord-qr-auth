@@ -1057,7 +1057,7 @@ dependencies = [
 [[package]]
 name = "tungstenite"
 version = "0.17.2"
-source = "git+https://github.com/n3oney/tungstenite-rs#80d0547fab5e4e510c73fb0c30f53d731864c37b"
+source = "git+https://github.com/safecord/tungstenite-rs#fbac5027ee338256b35982a11779a287a8fd0342"
 dependencies = [
  "base64",
  "byteorder",
