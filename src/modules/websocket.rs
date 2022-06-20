@@ -14,9 +14,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::{
     net::TcpStream,
-    sync::{
-        Mutex,
-    },
+    sync::Mutex,
     task::JoinHandle,
     time::{self, Interval},
 };
@@ -69,31 +67,31 @@ pub struct Authwebsocket {
 }
 
 impl Authwebsocket {
-    pub async fn get_code(&self) -> Option<QrCode> {
+    pub async fn get_code(&self) -> Result<QrCode, ()> {
         while let Ok(msg) = self.event_receiver.recv() {
             if let DiscordQrAuthMessage::QrCode(qr) = msg {
-                return Some(qr);
+                return Ok(qr);
             }
         }
-        None
+        Err(())
     }
 
-    pub async fn get_user(&self) -> Option<DiscordUser> {
+    pub async fn get_user(&self) -> Result<DiscordUser, ()> {
         while let Ok(msg) = self.event_receiver.recv() {
             if let DiscordQrAuthMessage::User(user) = msg {
-                return Some(user);
+                return Ok(user);
             }
         }
-        None
+        Err(())
     }
 
-    pub async fn get_token(&self) -> Option<String> {
+    pub async fn get_token(&self) -> Result<String, ()> {
         while let Ok(msg) = self.event_receiver.recv() {
             if let DiscordQrAuthMessage::Token(token) = msg {
-                return Some(token);
+                return Ok(token);
             }
         }
-        None
+        Err(())
     }
 
     pub async fn new(url: String) -> Self {
