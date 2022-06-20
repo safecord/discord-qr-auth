@@ -32,6 +32,7 @@ pub enum DiscordQrAuthMessage {
     QrCode(QrCode),
     User(DiscordUser),
     Token(String),
+    Disconnected,
 }
 
 #[derive(Error, Debug)]
@@ -40,6 +41,8 @@ pub enum DiscordQrAuthError {
     ConnectionFailed(#[from] tokio_tungstenite::tungstenite::Error),
     #[error("failed to create request")]
     RequestFailed(#[from] tokio_tungstenite::tungstenite::http::Error),
+    #[error("failed to generate private key")]
+    GenerateKeyFailed(#[from] rsa::errors::Error),
     #[error("unknown error")]
     Unknown,
 }
@@ -72,6 +75,28 @@ impl Default for Authwebsocket {
     }
 }
 
+macro_rules! ok_or_break {
+    ($res:expr) => {
+        match $res {
+            Ok(val) => val,
+            Err(_) => {
+                break;
+            }
+        }
+    };
+}
+
+macro_rules! some_or_break {
+    ($res:expr) => {
+        match $res {
+            Some(val) => val,
+            None => {
+                break;
+            }
+        }
+    };
+}
+
 impl Authwebsocket {
     pub async fn get_code(&self) -> Result<QrCode, DataError> {
         match &self.handle {
@@ -83,13 +108,11 @@ impl Authwebsocket {
             None => return Err(DataError::NotConnected),
         }
 
-        while let Ok(msg) = self.event_receiver.recv() {
-            if let DiscordQrAuthMessage::QrCode(qr) = msg {
-                return Ok(qr);
-            }
+        match self.event_receiver.recv() {
+            Ok(DiscordQrAuthMessage::QrCode(qr)) => Ok(qr),
+            Ok(DiscordQrAuthMessage::Disconnected) => Err(DataError::SocketClosed),
+            _ => Err(DataError::Unknown),
         }
-
-        Err(DataError::Unknown)
     }
 
     pub async fn get_user(&self) -> Result<DiscordUser, DataError> {
@@ -102,12 +125,11 @@ impl Authwebsocket {
             None => return Err(DataError::NotConnected),
         }
 
-        while let Ok(msg) = self.event_receiver.recv() {
-            if let DiscordQrAuthMessage::User(user) = msg {
-                return Ok(user);
-            }
+        match self.event_receiver.recv() {
+            Ok(DiscordQrAuthMessage::User(user)) => Ok(user),
+            Ok(DiscordQrAuthMessage::Disconnected) => Err(DataError::SocketClosed),
+            _ => Err(DataError::Unknown),
         }
-        Err(DataError::Unknown)
     }
 
     pub async fn get_token(&self) -> Result<String, DataError> {
@@ -120,12 +142,11 @@ impl Authwebsocket {
             None => return Err(DataError::NotConnected),
         }
 
-        while let Ok(msg) = self.event_receiver.recv() {
-            if let DiscordQrAuthMessage::Token(token) = msg {
-                return Ok(token);
-            }
+        match self.event_receiver.recv() {
+            Ok(DiscordQrAuthMessage::Token(token)) => Ok(token),
+            Ok(DiscordQrAuthMessage::Disconnected) => Err(DataError::SocketClosed),
+            _ => Err(DataError::Unknown),
         }
-        Err(DataError::Unknown)
     }
 
     pub async fn connect(&mut self) -> Result<(), DiscordQrAuthError> {
@@ -150,7 +171,7 @@ impl Authwebsocket {
 
         let mut rng: StdRng = SeedableRng::from_entropy();
 
-        let privkey = RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate key");
+        let privkey = RsaPrivateKey::new(&mut rng, 2048)?;
 
         let pubkey = privkey.to_public_key();
 
@@ -158,16 +179,16 @@ impl Authwebsocket {
             let mut initialized = false;
 
             while let Some(msg) = ws_receiver.next().await {
-                let msg = msg.unwrap();
+                let msg = ok_or_break!(msg);
 
                 if msg.is_text() {
-                    let content: Value = serde_json::from_str(&msg.to_string()).unwrap();
+                    let content: Value = ok_or_break!(serde_json::from_str(&msg.to_string()));
                     println!("New message: {}", content);
 
                     match content["op"].as_str() {
                         Some("hello") => {
                             let tx = ws_sender.clone();
-                            let duration = content["heartbeat_interval"].as_u64().unwrap();
+                            let duration = some_or_break!(content["heartbeat_interval"].as_u64());
                             tokio::task::spawn(async move {
                                 println!("Heartbeating every {} ms", duration);
                                 Authwebsocket::heartbeat(tx.clone(), duration).await;
@@ -179,7 +200,7 @@ impl Authwebsocket {
 
                             /* TODO: move this to hello OP */
                             if initialized == false {
-                                let pem = pubkey.to_public_key_pem(LineEnding::LF).unwrap();
+                                let pem = ok_or_break!(pubkey.to_public_key_pem(LineEnding::LF));
 
                                 let lines: String = pem.lines().skip(1).take(7).collect();
 
@@ -187,26 +208,21 @@ impl Authwebsocket {
                                     json!({"op": "init", "encoded_public_key": lines}).to_string(),
                                 );
 
-                                match ws_sender.clone().lock().await.send(init).await {
-                                    Ok(_) => println!("Sent init message"),
-                                    Err(err) => panic!("AuthWebSocket::parser - Error: {:?}", &err),
-                                }
+                                ok_or_break!(ws_sender.clone().lock().await.send(init).await);
 
                                 initialized = true;
                             }
                         }
                         Some("nonce_proof") => {
                             let encrypted_nonce =
-                                base64::decode(content["encrypted_nonce"].as_str().unwrap())
-                                    .unwrap();
+                                ok_or_break!(base64::decode(some_or_break!(content
+                                    ["encrypted_nonce"]
+                                    .as_str())));
 
-                            let nonce = match privkey.decrypt(
+                            let nonce = ok_or_break!(privkey.decrypt(
                                 PaddingScheme::new_oaep::<sha2::Sha256>(),
                                 encrypted_nonce.as_slice(),
-                            ) {
-                                Ok(nonce) => nonce,
-                                Err(err) => panic!("Failed to decrypt nonce: {:?}", &err),
-                            };
+                            ));
 
                             let mut hasher = Sha256::new();
 
@@ -220,77 +236,67 @@ impl Authwebsocket {
                                 json!({"op": "nonce_proof", "proof": proof}).to_string(),
                             );
 
-                            match ws_sender.clone().lock().await.send(response).await {
-                                Ok(_) => println!("Sent nonce_proof message"),
-                                Err(err) => panic!("AuthWebSocket::parser - Error: {:?}", &err),
-                            }
+                            ok_or_break!(ws_sender.clone().lock().await.send(response).await);
                         }
                         Some("pending_remote_init") => {
                             /* TODO: return QrCode */
-                            let fingerprint = content["fingerprint"].as_str().unwrap();
+                            let fingerprint = some_or_break!(content["fingerprint"].as_str());
 
-                            let code = QrCode::new(String::from(
+                            let code = ok_or_break!(QrCode::new(String::from(
                                 "https://discordapp.com/ra/".to_owned() + fingerprint,
-                            ))
-                            .unwrap();
+                            )));
 
-                            event_sender
-                                .send(DiscordQrAuthMessage::QrCode(code))
-                                .unwrap();
+                            ok_or_break!(event_sender.send(DiscordQrAuthMessage::QrCode(code)));
                         }
                         Some("pending_finish") => {
                             let data_encrypted =
-                                base64::decode(content["encrypted_user_payload"].as_str().unwrap())
-                                    .unwrap();
+                                ok_or_break!(base64::decode(some_or_break!(content
+                                    ["encrypted_user_payload"]
+                                    .as_str())));
 
-                            let data = match privkey.decrypt(
+                            let data = ok_or_break!(privkey.decrypt(
                                 PaddingScheme::new_oaep::<sha2::Sha256>(),
                                 &data_encrypted.as_slice(),
-                            ) {
-                                Ok(nonce) => nonce,
-                                Err(err) => panic!("Failed to decrypt user payload: {:?}", &err),
-                            };
+                            ));
 
-                            let data_str = from_utf8(&data).unwrap();
+                            let data_str = ok_or_break!(from_utf8(&data));
                             let formatted: Vec<&str> = data_str.split(":").collect();
 
                             let user = DiscordUser {
-                                snowflake: formatted[0]
-                                    .parse::<u64>()
-                                    .expect("error parsing snowflake."),
+                                snowflake: ok_or_break!(formatted[0].parse::<u64>()),
                                 discriminator: formatted[1].to_string(),
                                 avatar_hash: formatted[2].to_string(),
                                 username: formatted[3].to_string(),
                             };
 
-                            event_sender.send(DiscordQrAuthMessage::User(user)).unwrap();
+                            ok_or_break!(event_sender.send(DiscordQrAuthMessage::User(user)));
                         }
                         Some("finish") => {
                             let encrypted_token =
-                                base64::decode(content["encrypted_token"].as_str().unwrap())
-                                    .unwrap();
+                                ok_or_break!(base64::decode(some_or_break!(content
+                                    ["encrypted_token"]
+                                    .as_str())));
 
-                            let data = match privkey.decrypt(
+                            let data = ok_or_break!(privkey.decrypt(
                                 PaddingScheme::new_oaep::<sha2::Sha256>(),
                                 &encrypted_token.as_slice(),
-                            ) {
-                                Ok(token) => token,
-                                Err(_) => panic!("Failed to decrypt token"),
-                            };
+                            ));
 
-                            let token_str = from_utf8(&data).unwrap();
+                            let token_str = ok_or_break!(from_utf8(&data));
 
-                            event_sender
-                                .send(DiscordQrAuthMessage::Token(token_str.to_string()))
-                                .unwrap();
+                            ok_or_break!(event_sender
+                                .send(DiscordQrAuthMessage::Token(token_str.to_string())));
                         }
                         None => {
-                            panic!("AuthWebSocket::parser - Error")
+                            break;
                         }
                         Some(&_) => (),
                     }
                 }
             }
+
+            println!("Disconnected");
+            event_sender.send(DiscordQrAuthMessage::Disconnected).ok();
         });
 
         self.handle = Some(handle);
@@ -310,8 +316,8 @@ impl Authwebsocket {
 
             match channel_sender.lock().await.send(blood_cell).await {
                 Ok(_) => println!("Sent heartbeat"),
-                Err(err) => {
-                    panic!("AuthWebSocket::heartbeat - Error: {:?}", &err);
+                Err(_) => {
+                    break;
                 }
             }
         }
