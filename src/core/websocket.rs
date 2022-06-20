@@ -1,3 +1,5 @@
+//! The module containing the client that you use to authenticate with Discord.
+
 use std::{str::from_utf8, sync::Arc, time::Duration};
 
 use futures_util::{
@@ -21,8 +23,11 @@ use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
 };
 
+/// Represents the data that Discord provides when a user scans a QR code.
 pub struct DiscordUser {
+    /// The user's ID
     pub snowflake: u64,
+    /// Often called the "tag"
     pub discriminator: String,
     pub avatar_hash: String,
     pub username: String,
@@ -57,8 +62,11 @@ pub enum DataError {
     Unknown,
 }
 
+/// Client used to authenticate with Discord.
 pub struct Client {
+    /// An event receiver you can use to receive the raw events from the client, if you don't want to use the provided methods.
     pub event_receiver: flume::Receiver<DiscordQrAuthMessage>,
+    /// A Handle to the task that is running the WebSocket connection.
     pub handle: Option<JoinHandle<()>>,
     event_sender: flume::Sender<DiscordQrAuthMessage>,
 }
@@ -98,6 +106,7 @@ macro_rules! some_or_break {
 }
 
 impl Client {
+    /// Generates a QR code and returns it.
     pub async fn get_code(&self) -> Result<QrCode, DataError> {
         match &self.handle {
             Some(handle) => {
@@ -115,6 +124,7 @@ impl Client {
         }
     }
 
+    /// Waits for a user to scan the QR code and returns their details.
     pub async fn get_user(&self) -> Result<DiscordUser, DataError> {
         match &self.handle {
             Some(handle) => {
@@ -132,6 +142,7 @@ impl Client {
         }
     }
 
+    /// Waits for a user to accept the login and returns the token.
     pub async fn get_token(&self) -> Result<String, DataError> {
         match &self.handle {
             Some(handle) => {
@@ -149,11 +160,11 @@ impl Client {
         }
     }
 
+    /// Connects to Discord's WebSocket. You **must** run this before you can use the other methods.
     pub async fn connect(&mut self) -> Result<(), DiscordQrAuthError> {
-        let request = Request::builder().uri(String::from("wss://remote-auth-gateway.discord.gg/?v=1"))
-            .header("Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits")
+        let request = Request::builder()
+            .uri(String::from("wss://remote-auth-gateway.discord.gg/?v=1"))
             .header("Origin", "https://discord.com")
-            .header("User-Agent", "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.63 Mobile Safari/537.36 Edg/102.0.1245.33")
             .header("Sec-WebSocket-Key", generate_key())
             .header("Sec-WebSocket-Version", "13")
             .header("Host", "remote-auth-gateway.discord.gg")
@@ -304,7 +315,7 @@ impl Client {
         Ok(())
     }
 
-    pub async fn heartbeat(
+    async fn heartbeat(
         channel_sender: Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>,
         interval: u64,
     ) {
