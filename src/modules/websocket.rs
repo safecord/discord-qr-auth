@@ -96,15 +96,16 @@ impl Authwebsocket {
 
     pub async fn new(url: String) -> Self {
         let request = Request::builder().uri(url)
-        .header("Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits")
-        .header("Origin", "https://discord.com")
-        .header("User-Agent", "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.63 Mobile Safari/537.36 Edg/102.0.1245.33")
-        .header("Sec-WebSocket-Key", generate_key())
-        .header("Sec-WebSocket-Version", "13")
-        .header("Host", "remote-auth-gateway.discord.gg")
-        .header("Connection", "Upgrade")
-        .header("Upgrade", "websocket")
-        .body(()).unwrap();
+            .header("Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits")
+            .header("Origin", "https://discord.com")
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.63 Mobile Safari/537.36 Edg/102.0.1245.33")
+            .header("Sec-WebSocket-Key", generate_key())
+            .header("Sec-WebSocket-Version", "13")
+            .header("Host", "remote-auth-gateway.discord.gg")
+            .header("Connection", "Upgrade")
+            .header("Upgrade", "websocket")
+            .body(())
+            .unwrap();
 
         let stream = match connect_async(request).await {
             Ok(stream) => stream.0,
