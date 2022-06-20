@@ -4,7 +4,7 @@ use futures_util::{
     stream::{SplitSink, SplitStream, StreamExt},
     SinkExt,
 };
-use qrcode::QrCode;
+use qrcode::{render::unicode, QrCode};
 use rand::{prelude::StdRng, SeedableRng};
 use rsa::{
     pkcs8::{EncodePublicKey, LineEnding},
@@ -161,8 +161,13 @@ impl Authwebsocket {
                             ))
                             .unwrap();
 
-                            let img = code.render::<Luma<u8>>().build();
-                            img.save("code.png").unwrap();
+                            let img = code
+                                .render::<unicode::Dense1x2>()
+                                .dark_color(unicode::Dense1x2::Light)
+                                .light_color(unicode::Dense1x2::Dark)
+                                .build();
+
+                            println!("{}", img);
                         }
                         Some("pending_finish") => {
                             let data_encrypted =
