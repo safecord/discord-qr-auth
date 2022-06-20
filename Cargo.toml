@@ -1,23 +1,27 @@
 [package]
+description = "A Rust library to authenticate with Discord using QR codes."
+homepage = "https://github.com/safecord/discord-qr-auth"
+keywords = ["discord", "api", "qr", "auth"]
+license = "ISC"
+repository = "https://github.com/safecord/discord-qr-auth.git"
+edition = "2021"
 name = "discord-qr-auth"
 version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+include = ["src/**/*.rs", "LICENSE.md", "README.md", "CHANGELOG.md"]
 
 [dependencies]
-tokio-tungstenite = { version = "*", features = ["native-tls"] }
-tokio = { version = "1.19.2", features = ["full"] }
-futures-util = "0.3.21"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-rsa = "0.6.1"
-rand = "0.8.5"
 base64 = "0.13.0"
-sha2 = "0.10.2"
-qrcode = "0.12.0"
 flume = "0.10.13"
+futures-util = "0.3.21"
+qrcode = "0.12.0"
+rand = "0.8.5"
+rsa = "0.6.1"
+serde = {version = "1.0", features = ["derive"]}
+serde_json = "1.0"
+sha2 = "0.10.2"
 thiserror = "1.0.31"
+tokio = {version = "1.19.2", features = ["full"]}
+tokio-tungstenite = {version = "*", features = ["native-tls"]}
 
 [patch.crates-io]
-tungstenite = { git="https://github.com/n3oney/tungstenite-rs"}
+tungstenite = {git = "https://github.com/n3oney/tungstenite-rs"}
