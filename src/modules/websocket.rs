@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{str::from_utf8, sync::Arc, time::Duration};
 
 use futures_util::{
     stream::{SplitSink, SplitStream, StreamExt},
@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 use tokio::{
     net::TcpStream,
     sync::Mutex,
-    time::{self, sleep, Interval},
+    time::{self, Interval},
 };
 
 use image::Luma;
@@ -24,6 +24,13 @@ use tokio_tungstenite::{
     tungstenite::{handshake::client::generate_key, http::Request, Message},
     MaybeTlsStream, WebSocketStream,
 };
+
+struct DiscordUser {
+    snowflake: u64,
+    discriminator: u8,
+    avatar_hash: String,
+    username: String,
+}
 
 #[derive(Clone)]
 pub struct Authwebsocket {
@@ -156,6 +163,30 @@ impl Authwebsocket {
 
                             let img = code.render::<Luma<u8>>().build();
                             img.save("code.png").unwrap();
+                        }
+                        Some("pending_finish") => {
+                            let data_encrypted =
+                                base64::decode(content["encrypted_user_payload"].as_str().unwrap())
+                                    .unwrap();
+                            let key = self.key.lock().await;
+
+                            let data = match key.decrypt(
+                                PaddingScheme::new_oaep::<sha2::Sha256>(),
+                                &data_encrypted.as_slice(),
+                            ) {
+                                Ok(nonce) => nonce,
+                                Err(err) => panic!("Failed to decrypt user payload: {:?}", &err),
+                            };
+
+                            let data_str = from_utf8(&data).unwrap();
+                            let formatted: Vec<&str> = data_str.split(":").collect();
+
+                            let user = DiscordUser {
+                                snowflake: formatted[0].parse::<u64>().unwrap(),
+                                discriminator: formatted[1].parse::<u8>().unwrap(),
+                                avatar_hash: formatted[2].to_string(),
+                                username: formatted[3].to_string(),
+                            };
                         }
                         None => {
                             panic!("AuthWebSocket::parser - Error")

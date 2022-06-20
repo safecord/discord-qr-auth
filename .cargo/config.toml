@@ -1,5 +1,5 @@
 [build]
-rustc-wrapper = 'C:\Users\raizo\.cargo\bin\sccache.exe'
+rustc-wrapper = '/Users/raizo/.cargo/bin/sccache'
 [target.x86_64-unknown-linux-gnu]
 rustflags = [
     '-Clink-arg=-fuse-ld=lld',
