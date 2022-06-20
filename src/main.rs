@@ -1,6 +1,6 @@
 use qrcode::render::unicode;
 
-use crate::modules::websocket::Authwebsocket;
+use crate::modules::websocket::Client;
 
 pub mod modules {
     pub mod websocket;
@@ -8,7 +8,7 @@ pub mod modules {
 
 #[tokio::main]
 async fn main() {
-    let mut ws = Authwebsocket::default();
+    let mut ws = Client::default();
     ws.connect().await.unwrap();
     let qr = ws.get_code().await.unwrap();
 
@@ -26,8 +26,4 @@ async fn main() {
     let token = ws.get_token().await.unwrap();
 
     println!("And we have a token! {}", token);
-
-    ws.handle.unwrap().abort();
-
-    println!("Handler stopped.");
 }

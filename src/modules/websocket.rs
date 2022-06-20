@@ -57,13 +57,13 @@ pub enum DataError {
     Unknown,
 }
 
-pub struct Authwebsocket {
+pub struct Client {
     pub event_receiver: flume::Receiver<DiscordQrAuthMessage>,
     pub handle: Option<JoinHandle<()>>,
     event_sender: flume::Sender<DiscordQrAuthMessage>,
 }
 
-impl Default for Authwebsocket {
+impl Default for Client {
     fn default() -> Self {
         let (event_sender, event_receiver) = flume::unbounded();
 
@@ -97,7 +97,7 @@ macro_rules! some_or_break {
     };
 }
 
-impl Authwebsocket {
+impl Client {
     pub async fn get_code(&self) -> Result<QrCode, DataError> {
         match &self.handle {
             Some(handle) => {
@@ -191,7 +191,7 @@ impl Authwebsocket {
                             let duration = some_or_break!(content["heartbeat_interval"].as_u64());
                             tokio::task::spawn(async move {
                                 println!("Heartbeating every {} ms", duration);
-                                Authwebsocket::heartbeat(tx.clone(), duration).await;
+                                Client::heartbeat(tx.clone(), duration).await;
                             });
                         }
                         Some("heartbeat_ack") => {
