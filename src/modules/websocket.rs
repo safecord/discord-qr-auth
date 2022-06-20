@@ -128,11 +128,9 @@ impl Authwebsocket {
 
         let mut rng: StdRng = SeedableRng::from_entropy();
 
-        let privkey = Arc::new(Mutex::new(
-            RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate key"),
-        ));
+        let privkey = RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate key");
 
-        let pubkey = privkey.lock().await.to_public_key();
+        let pubkey = privkey.to_public_key();
 
         let handle = tokio::task::spawn(async move {
             let mut initialized = false;
@@ -180,7 +178,7 @@ impl Authwebsocket {
                                 base64::decode(content["encrypted_nonce"].as_str().unwrap())
                                     .unwrap();
 
-                            let nonce = match privkey.lock().await.decrypt(
+                            let nonce = match privkey.decrypt(
                                 PaddingScheme::new_oaep::<sha2::Sha256>(),
                                 encrypted_nonce.as_slice(),
                             ) {
@@ -223,7 +221,7 @@ impl Authwebsocket {
                                 base64::decode(content["encrypted_user_payload"].as_str().unwrap())
                                     .unwrap();
 
-                            let data = match privkey.lock().await.decrypt(
+                            let data = match privkey.decrypt(
                                 PaddingScheme::new_oaep::<sha2::Sha256>(),
                                 &data_encrypted.as_slice(),
                             ) {
@@ -250,7 +248,7 @@ impl Authwebsocket {
                                 base64::decode(content["encrypted_token"].as_str().unwrap())
                                     .unwrap();
 
-                            let data = match privkey.lock().await.decrypt(
+                            let data = match privkey.decrypt(
                                 PaddingScheme::new_oaep::<sha2::Sha256>(),
                                 &encrypted_token.as_slice(),
                             ) {
