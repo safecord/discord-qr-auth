@@ -9,7 +9,7 @@ pub mod modules {
 #[tokio::main]
 async fn main() {
     let ws = Authwebsocket::default();
-    let handle = ws.parser().await;
+    let handle = ws.connect().await;
     let qr = ws.get_code().await.unwrap();
 
     let image = qr

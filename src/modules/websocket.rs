@@ -102,7 +102,7 @@ impl Authwebsocket {
         Err(())
     }
 
-    pub async fn parser(&self) -> JoinHandle<()> {
+    pub async fn connect(&self) -> JoinHandle<()> {
         let request = Request::builder().uri(String::from("wss://remote-auth-gateway.discord.gg/?v=1"))
             .header("Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits")
             .header("Origin", "https://discord.com")
