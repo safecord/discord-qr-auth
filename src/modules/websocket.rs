@@ -4,7 +4,7 @@ use futures_util::{
     stream::{SplitSink, StreamExt},
     SinkExt,
 };
-use qrcode::{render::unicode, QrCode};
+use qrcode::QrCode;
 use rand::{prelude::StdRng, SeedableRng};
 use rsa::{
     pkcs8::{EncodePublicKey, LineEnding},
@@ -52,25 +52,6 @@ pub enum DataError {
     SocketClosed,
     #[error("unknown error")]
     Unknown,
-}
-
-impl std::fmt::Debug for DiscordQrAuthMessage {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::QrCode(arg0) => f
-                .debug_tuple("QrCode")
-                .field(
-                    &arg0
-                        .render::<unicode::Dense1x2>()
-                        .dark_color(unicode::Dense1x2::Light)
-                        .light_color(unicode::Dense1x2::Dark)
-                        .build(),
-                )
-                .finish(),
-            Self::User(arg0) => f.debug_tuple("User").field(&arg0.snowflake).finish(),
-            Self::Token(arg0) => f.debug_tuple("Token").field(arg0).finish(),
-        }
-    }
 }
 
 pub struct Authwebsocket {
