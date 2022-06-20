@@ -17,6 +17,7 @@ base64 = "0.13.0"
 sha2 = "0.10.2"
 qrcode = "0.12.0"
 image = "0.23.2"
+flume = "0.10.13"
 
 [patch.crates-io]
 tungstenite = { git="https://github.com/n3oney/tungstenite-rs"}
