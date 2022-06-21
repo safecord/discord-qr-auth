@@ -22,6 +22,7 @@ sha2 = "0.10.2"
 thiserror = "1.0.31"
 tokio = {version = "1.19.2", features = ["full"]}
 tokio-tungstenite = {version = "*", features = ["native-tls"]}
+tracing = "0.1.35"
 
 [patch.crates-io]
 tungstenite = {git = "https://github.com/safecord/tungstenite-rs"}

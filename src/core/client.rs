@@ -21,6 +21,7 @@ use tokio_tungstenite::{
     tungstenite::{handshake::client::generate_key, http::Request, Message},
     MaybeTlsStream, WebSocketStream,
 };
+use tracing::{event, Level};
 
 use super::{
     errors::{DataError, DiscordQrAuthError},
@@ -175,19 +176,20 @@ impl Client {
 
                 if msg.is_text() {
                     let content: Value = ok_or_break!(serde_json::from_str(&msg.to_string()));
-                    println!("New message: {}", content);
+
+                    event!(Level::DEBUG, "Received message: {:?}", content);
 
                     match content["op"].as_str() {
                         Some("hello") => {
                             let tx = ws_sender.clone();
                             let duration = some_or_break!(content["heartbeat_interval"].as_u64());
                             tokio::task::spawn(async move {
-                                println!("Heartbeating every {} ms", duration);
+                                event!(Level::DEBUG, "Starting to heartbeat every {} ms", duration);
                                 Client::heartbeat(tx.clone(), duration).await;
                             });
                         }
                         Some("heartbeat_ack") => {
-                            println!("Heartbeat acknowledged");
+                            event!(Level::DEBUG, "Heartbeat acknowledged");
                             /* TODO: check if heartbeat_ack did not happen after heartbeat OP */
 
                             /* TODO: move this to hello OP */
@@ -287,7 +289,7 @@ impl Client {
                 }
             }
 
-            println!("Disconnected");
+            event!(Level::DEBUG, "WebSocket closed");
             event_sender.send(DiscordQrAuthMessage::Disconnected).ok();
         });
 
@@ -307,7 +309,7 @@ impl Client {
             let blood_cell = Message::Text(json!({"op": "heartbeat"}).to_string());
 
             match channel_sender.lock().await.send(blood_cell).await {
-                Ok(_) => println!("Sent heartbeat"),
+                Ok(_) => event!(Level::DEBUG, "Heartbeat sent"),
                 Err(_) => {
                     break;
                 }
