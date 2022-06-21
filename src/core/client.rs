@@ -22,7 +22,10 @@ use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
 };
 
-use super::{errors::{DataError, DiscordQrAuthError}, user::DiscordUser};
+use super::{
+    errors::{DataError, DiscordQrAuthError},
+    user::DiscordUser,
+};
 
 pub enum DiscordQrAuthMessage {
     QrCode(QrCode),
@@ -86,11 +89,14 @@ impl Client {
             None => return Err(DataError::NotConnected),
         }
 
-        match self.event_receiver.recv() {
-            Ok(DiscordQrAuthMessage::QrCode(qr)) => Ok(qr),
-            Ok(DiscordQrAuthMessage::Disconnected) => Err(DataError::SocketClosed),
-            _ => Err(DataError::Unknown),
+        while let Ok(message) = self.event_receiver.recv() {
+            match message {
+                DiscordQrAuthMessage::QrCode(qr) => return Ok(qr),
+                DiscordQrAuthMessage::Disconnected => return Err(DataError::SocketClosed),
+                _ => {}
+            }
         }
+        Err(DataError::SocketClosed)
     }
 
     /// Waits for a user to scan the QR code and returns their details.
@@ -104,11 +110,14 @@ impl Client {
             None => return Err(DataError::NotConnected),
         }
 
-        match self.event_receiver.recv() {
-            Ok(DiscordQrAuthMessage::User(user)) => Ok(user),
-            Ok(DiscordQrAuthMessage::Disconnected) => Err(DataError::SocketClosed),
-            _ => Err(DataError::Unknown),
+        while let Ok(message) = self.event_receiver.recv() {
+            match message {
+                DiscordQrAuthMessage::User(user) => return Ok(user),
+                DiscordQrAuthMessage::Disconnected => return Err(DataError::SocketClosed),
+                _ => {}
+            }
         }
+        Err(DataError::SocketClosed)
     }
 
     /// Waits for a user to accept the login and returns the token.
@@ -122,11 +131,14 @@ impl Client {
             None => return Err(DataError::NotConnected),
         }
 
-        match self.event_receiver.recv() {
-            Ok(DiscordQrAuthMessage::Token(token)) => Ok(token),
-            Ok(DiscordQrAuthMessage::Disconnected) => Err(DataError::SocketClosed),
-            _ => Err(DataError::Unknown),
+        while let Ok(message) = self.event_receiver.recv() {
+            match message {
+                DiscordQrAuthMessage::Token(token) => return Ok(token),
+                DiscordQrAuthMessage::Disconnected => return Err(DataError::SocketClosed),
+                _ => {}
+            }
         }
+        Err(DataError::SocketClosed)
     }
 
     /// Connects to Discord's WebSocket. You **must** run this before you can use the other methods.
