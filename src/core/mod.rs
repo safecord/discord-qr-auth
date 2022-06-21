@@ -1,3 +1,5 @@
 //! The core elements of the crate
 
-pub mod websocket;
+pub mod errors;
+pub mod client;
+pub mod user;

@@ -14,7 +14,6 @@ use rsa::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use thiserror::Error;
 use tokio::{net::TcpStream, sync::Mutex, task::JoinHandle, time};
 
 use tokio_tungstenite::{
@@ -23,43 +22,13 @@ use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
 };
 
-/// Represents the data that Discord provides when a user scans a QR code.
-pub struct DiscordUser {
-    /// The user's ID
-    pub snowflake: u64,
-    /// Often called the "tag"
-    pub discriminator: String,
-    pub avatar_hash: String,
-    pub username: String,
-}
+use super::{errors::{DataError, DiscordQrAuthError}, user::DiscordUser};
 
 pub enum DiscordQrAuthMessage {
     QrCode(QrCode),
     User(DiscordUser),
     Token(String),
     Disconnected,
-}
-
-#[derive(Error, Debug)]
-pub enum DiscordQrAuthError {
-    #[error("failed to connect to WebSocket")]
-    ConnectionFailed(#[from] tokio_tungstenite::tungstenite::Error),
-    #[error("failed to create request")]
-    RequestFailed(#[from] tokio_tungstenite::tungstenite::http::Error),
-    #[error("failed to generate private key")]
-    GenerateKeyFailed(#[from] rsa::errors::Error),
-    #[error("unknown error")]
-    Unknown,
-}
-
-#[derive(Error, Debug)]
-pub enum DataError {
-    #[error("the WebSocket connection hasn't been started")]
-    NotConnected,
-    #[error("the WebSocket connection is closed")]
-    SocketClosed,
-    #[error("unknown error")]
-    Unknown,
 }
 
 /// Client used to authenticate with Discord.

@@ -1,5 +1,5 @@
 use qrcode::render::unicode;
-use discord_qr_auth::core::websocket::Client;
+use discord_qr_auth::Client;
 
 #[tokio::main]
 async fn main() {
