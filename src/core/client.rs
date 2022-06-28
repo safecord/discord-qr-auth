@@ -12,7 +12,8 @@ use rsa::{
     pkcs8::{EncodePublicKey, LineEnding},
     PaddingScheme, RsaPrivateKey,
 };
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use tokio::{net::TcpStream, sync::Mutex, task::JoinHandle, time};
 
@@ -33,6 +34,24 @@ pub enum DiscordQrAuthMessage {
     User(DiscordUser),
     Token(String),
     Disconnected,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DiscordMessage {
+    op: String,
+    /* optional fields */
+    #[serde(default)]
+    timeout_ms: u64,
+    #[serde(default)]
+    heartbeat_interval: u64,
+    #[serde(default)]
+    encrypted_nonce: String,
+    #[serde(default)]
+    fingerprint: String,
+    #[serde(default)]
+    encrypted_user_payload: String,
+    #[serde(default)]
+    encrypted_token: String,
 }
 
 /// Client used to authenticate with Discord.
@@ -61,17 +80,6 @@ macro_rules! ok_or_break {
         match $res {
             Ok(val) => val,
             Err(_) => {
-                break;
-            }
-        }
-    };
-}
-
-macro_rules! some_or_break {
-    ($res:expr) => {
-        match $res {
-            Some(val) => val,
-            None => {
                 break;
             }
         }
@@ -175,20 +183,21 @@ impl Client {
                 let msg = ok_or_break!(msg);
 
                 if msg.is_text() {
-                    let content: Value = ok_or_break!(serde_json::from_str(&msg.to_string()));
+                    let content: DiscordMessage =
+                        ok_or_break!(serde_json::from_str(&msg.to_string()));
 
                     event!(Level::DEBUG, "Received message: {:?}", content);
 
-                    match content["op"].as_str() {
-                        Some("hello") => {
+                    match content.op.as_str() {
+                        "hello" => {
                             let tx = ws_sender.clone();
-                            let duration = some_or_break!(content["heartbeat_interval"].as_u64());
+                            let duration = content.heartbeat_interval;
                             tokio::task::spawn(async move {
                                 event!(Level::DEBUG, "Starting to heartbeat every {} ms", duration);
                                 Client::heartbeat(tx.clone(), duration).await;
                             });
                         }
-                        Some("heartbeat_ack") => {
+                        "heartbeat_ack" => {
                             event!(Level::DEBUG, "Heartbeat acknowledged");
                             /* TODO: check if heartbeat_ack did not happen after heartbeat OP */
 
@@ -207,11 +216,9 @@ impl Client {
                                 initialized = true;
                             }
                         }
-                        Some("nonce_proof") => {
+                        "nonce_proof" => {
                             let encrypted_nonce =
-                                ok_or_break!(base64::decode(some_or_break!(content
-                                    ["encrypted_nonce"]
-                                    .as_str())));
+                                ok_or_break!(base64::decode(content.encrypted_nonce.as_str()));
 
                             let nonce = ok_or_break!(privkey.decrypt(
                                 PaddingScheme::new_oaep::<sha2::Sha256>(),
@@ -232,9 +239,9 @@ impl Client {
 
                             ok_or_break!(ws_sender.clone().lock().await.send(response).await);
                         }
-                        Some("pending_remote_init") => {
+                        "pending_remote_init" => {
                             /* TODO: return QrCode */
-                            let fingerprint = some_or_break!(content["fingerprint"].as_str());
+                            let fingerprint = content.fingerprint.as_str();
 
                             let code = ok_or_break!(QrCode::new(String::from(
                                 "https://discordapp.com/ra/".to_owned() + fingerprint,
@@ -242,11 +249,10 @@ impl Client {
 
                             ok_or_break!(event_sender.send(DiscordQrAuthMessage::QrCode(code)));
                         }
-                        Some("pending_finish") => {
-                            let data_encrypted =
-                                ok_or_break!(base64::decode(some_or_break!(content
-                                    ["encrypted_user_payload"]
-                                    .as_str())));
+                        "pending_finish" => {
+                            let data_encrypted = ok_or_break!(base64::decode(
+                                content.encrypted_user_payload.as_str()
+                            ));
 
                             let data = ok_or_break!(privkey.decrypt(
                                 PaddingScheme::new_oaep::<sha2::Sha256>(),
@@ -265,11 +271,9 @@ impl Client {
 
                             ok_or_break!(event_sender.send(DiscordQrAuthMessage::User(user)));
                         }
-                        Some("finish") => {
+                        "finish" => {
                             let encrypted_token =
-                                ok_or_break!(base64::decode(some_or_break!(content
-                                    ["encrypted_token"]
-                                    .as_str())));
+                                ok_or_break!(base64::decode(content.encrypted_token.as_str()));
 
                             let data = ok_or_break!(privkey.decrypt(
                                 PaddingScheme::new_oaep::<sha2::Sha256>(),
@@ -281,10 +285,9 @@ impl Client {
                             ok_or_break!(event_sender
                                 .send(DiscordQrAuthMessage::Token(token_str.to_string())));
                         }
-                        None => {
-                            break;
+                        &_ => {
+                            panic!();
                         }
-                        Some(&_) => (),
                     }
                 }
             }
